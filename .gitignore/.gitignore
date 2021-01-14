@@ -1,0 +1,580 @@
+/*
+Megumi Kivuva 
+ mk5730@bard.edu
+ Progamming Nature Final Project
+ */
+
+//Creates a world, allows a new lion to be added based on mouse position and
+//sheep based on the keys 
+
+World world;
+
+FlowField Sheep;
+float mutationRate; 
+
+
+
+void setup() {
+  size(1600, 1600);
+  mutationRate = .01;
+  world = new World(10);
+  smooth(); //smooth oscilation between points
+}
+
+void draw() {
+  if (world.lions.size()>=6) {
+    world.run();
+    world.addSheep();
+  } else {
+    world.selection();
+    world.reproduction();
+  }
+}
+  void mousePressed() {
+    world.addLion(mouseX, mouseY);
+  }
+  
+  void mouseDragged(){
+    world.addLion(mouseX, mouseY);
+  }
+  
+  void keyPressed() {
+    world.sheep.add(new Sheep(new PVector (mouseX, mouseY)));
+  }
+  
+  
+  class DNA {
+
+  float[] genes; //array of genes
+  /*
+  dictates their speed and size, represented as a random floating point value between 0 and 1
+  */
+  DNA() {
+    // DNA is random float values between 0 and 1
+    genes = new float[1];
+    genes[0] = random(0, 1);   //lion's health 
+  }
+
+  DNA(float[] newgenes) {
+    genes = newgenes;
+  }
+
+  /*
+  allows for sexual reproduction by passing through another strand of DNA from the partner; 
+  the gene sequence is split into two and based on a crossover value, the child gets one part of
+  the DNA from one parent and the second part from the other parent
+  */
+  DNA crossover(DNA partner) {
+    float[] child = new float[genes.length];
+    // Pick a midpofloat
+    float crossover = random(genes.length);
+    // Take "half" from one and "half" from the other
+    for (int i = 0; i < genes.length; i++) {
+      if (i > crossover) child[i] = genes[i];
+      else               child[i] = partner.genes[i];
+    }    
+    DNA newgenes = new DNA(child);
+    return newgenes;
+  }
+
+  /*
+  allows for asexual reproduction by making a direct copy 
+  of the genes of the previous genes
+  */
+  DNA copy() {
+    float[] newgenes = new float[genes.length];
+    for (int i = 0; i < newgenes.length; i++) {
+      newgenes[i] = genes[i];
+    }
+
+    return new DNA(newgenes);
+  }
+
+  /*
+  allows for gene mutation dictated by the mutation rate
+  a new random float is chosen based on the mutation probability
+  */
+  void mutate(float m) {
+    m = mutationRate;
+    if (random(1) < m) {
+      genes[0] = random(0, 1);
+    }
+  }
+}
+
+class FlowField {
+  PVector[][] field;
+  int cols, rows;
+  int resolution; 
+
+  FlowField(int r) {
+    resolution = r;
+    cols = width/resolution;
+    rows = height/resolution;
+    field = new PVector[cols][rows];
+    init();
+  }
+  //creates a new flow field everytime, ie, a grid where each square 
+  //is a different direction
+  void init() {
+    noiseSeed((int)random(10000));
+    float xoff = 0;
+    for (int i = 0; i < cols; i++) {
+      float yoff = 0;
+      for (int j = 0; j < rows; j++) {
+        float theta = map(noise(xoff,yoff),0,1,0,TWO_PI);
+        field[i][j] = new PVector(cos(theta),sin(theta));
+        yoff += 0.1;
+      }
+      xoff += 0.1;
+    }
+  }
+  
+  //creates the grid for the flow field
+  PVector lookup(PVector lookup) {
+    int column = int(constrain(lookup.x/resolution,0,cols-1));
+    int row = int(constrain(lookup.y/resolution,0,rows-1));
+    return field[column][row].get();
+  }
+}
+
+class Lion {
+
+  PVector location; // Location
+  DNA dna;          // DNA
+  float health;     // Life variable
+  float xoff;       
+  float yoff;
+  float mass;
+  PVector velocity, acceleration;
+  
+  float r;
+  float maxspeed, maxforce;
+  float size;
+  float fitness;
+  boolean male, female;
+  //int lifespan;
+
+  // Create a "lion" creature
+  Lion(PVector l, DNA dna_) {
+    location = l.get();
+    health = int (random(100, 200));
+    xoff = random(1000);
+    yoff = random(1000);
+    velocity = new PVector(0, 0);
+    acceleration =  new PVector(0, 0);
+    dna = dna_;
+    maxspeed = map(dna.genes[0], 0, 1, 15, 0);  //genes determine size 
+    r = map(dna.genes[0], 0, 1, 5, 50);  //genes determine speed
+    size = 4; 
+    mass = random(30); 
+    maxforce = 2;
+  }
+  
+  //return fitness
+  float getFitness() {
+    return fitness;
+  }
+
+  //return DNA
+  DNA getDNA(){
+    return dna;
+  }
+
+  //call update, borders and display
+  void run() {
+    update();
+    borders();
+    display();
+  }
+
+  //is there a sheep nearby?
+  boolean sense(PVector p) {
+    float d = dist(location.x, location.y, p.x, p.y);
+    if ( d< 80 ) {     
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  //hunt sheep
+    void arrive(Sheep s) { // Code from the book
+    PVector desired = PVector.sub(s.location, location);
+    desired.normalize();
+    float d = desired.mag();
+    if (d < 20 ) {
+      float m = map(d, 0, 100, 0, maxspeed); 
+      desired.mult(m);
+    } else {
+      desired.mult(maxspeed);
+    }
+    PVector steer = PVector.sub(desired, velocity);
+    steer.limit(maxforce);
+    applyForce(steer);
+  }
+
+
+
+
+  // update location
+  void update() {
+    // Simple movement based on perlin noise
+    float vx = map(noise(xoff), 0, 1, -maxspeed, maxspeed);
+    float vy = map(noise(yoff), 0, 1, -maxspeed, maxspeed);
+    velocity = new PVector(vx, vy);
+    xoff += 0.01;
+    yoff += 0.01;
+    location.add(velocity);
+
+    velocity.add(acceleration);
+    velocity.limit(maxspeed); // Can never move faster than 5
+    location.add(velocity);// Move
+    acceleration.mult(0); // Reset acceleration
+    //overtime the lions loose their health
+    health -= 0.2;
+    //fitness is based on health
+    if (health>400) {
+      fitness +=20;
+    }
+    //fitness is based on size
+    if(r>40){
+      fitness +=10;
+    }
+  }
+
+  void applyForce(PVector force) {
+    PVector f = PVector.div(force, mass);
+    acceleration.add(f);
+  }
+
+  //wraparound effect
+  void borders() {
+    if (location.x < -r) location.x = width+r;
+    if (location.y < -r) location.y = height+r;
+    if (location.x > width+r) location.x = -r;
+    if (location.y > height+r) location.y = -r;
+  }
+
+
+  // display lion
+  void display() {
+    //lifespan+=1;
+    fill(255);
+    stroke(2);
+    pushMatrix();
+    beginShape();
+    fill(227, 168, 87);
+    ellipse(location.x, location.y, size+r+20, size+r+20);
+    fill(138, 73, 0);
+    ellipse(location.x, location.y, size+r-10, size+r-10);
+    endShape(CLOSE);
+    popMatrix();
+  }
+
+  //return true when health is less than 0
+  boolean dead() {
+    if (health < 0.0) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+}
+
+class Screen {
+
+  PImage winter, spring, summer, fall;  //different images for enviroments
+
+  Screen() {
+    winter=loadImage("Snowfall.jpg");  //loading images
+    winter.resize(1600, 1600);
+    spring=loadImage("spring.png");
+    spring.resize(1600, 1600);
+    summer=loadImage("Waterfall.jpg");
+    summer.resize(1600, 1600);
+    fall=loadImage("fall.jpg");
+    fall.resize(1600, 1600);
+  }
+
+  void spring() {  //display spring
+    imageMode(CORNER);
+    image(spring, 0, 0);
+  } 
+  void winter() {  //display winter
+    imageMode(CORNER);
+    image(winter, 0, 0);
+  } 
+  void summer() {  //display summer
+    imageMode(CORNER);
+    image(summer, 0, 0);
+  } 
+  void fall() {  //display fall
+    imageMode(CORNER);
+    image(fall, 0, 0);
+  }
+}
+
+class Sheep {
+  PVector location;
+  PVector velocity;
+  PVector acceleration;
+  float sense;
+  int maxspeed, mass, maxforce;
+
+  Sheep(PVector loc) { // Start sheep at random locations
+    sense = 100; // Can sense preds in 100 pixels, left as a variable to be easily expanded into different types
+    location = loc;
+    velocity = new PVector(0, 0);
+    acceleration =  new PVector(0, 0);
+    maxspeed = 5;
+    mass = 1;
+    maxforce = 2;
+  }
+
+  Boolean sense(Lion l) {// returns true if a pred is within range, false otherwise
+    float dist = dist(l.location.x, l.location.y, location.x, location.y);
+    if (dist<100) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  void avoidLion(Lion l) {// If a pred is sensed try to move away from it
+    if (sense(l)) {    
+      PVector s = PVector.sub(l.location, location);
+      s.normalize();
+      s.mult(-1);//Move away from the predator
+      applyForce(s);
+      arrive(l.location); //Slows down if the pred is farther away
+    }
+  }
+
+  void arrive(PVector target) { // Code from the book
+    PVector desired = PVector.sub(target, location);
+    desired.normalize();
+    float d = desired.mag();
+    if (d > 80 ) {
+      float m = map(d, 0, 100, 0, maxspeed); 
+      desired.mult(m);
+    } else {
+      desired.mult(maxspeed);
+    }
+    PVector steer = PVector.sub(desired, velocity);
+    steer.limit(maxforce);
+    applyForce(steer);
+  }
+
+  void update() { // Apply acceleration
+    velocity.add(acceleration);
+    velocity.limit(maxspeed); // Can never move faster than 5
+    location.add(velocity);// Move
+    acceleration.mult(0); // Reset acceleration
+    //println(location);
+  }
+
+
+  void display() { 
+    beginShape();
+    fill(255);
+    ellipse(location.x+10, location.y+10,100,50); 
+    fill(255);
+    ellipse(location.x+50, location.y-7, 40, 40);
+    endShape(CLOSE);
+  }
+
+  void applyForce(PVector force) {// Apply force with newtons laws in mind
+    PVector f = PVector.div(force, mass);
+    acceleration.add(f);
+  }
+  
+  void follow(FlowField flow) {
+    PVector desired = flow.lookup(location);
+    desired.mult(maxspeed);
+    PVector steer = PVector.sub(desired, velocity);
+    steer.limit(maxforce);
+    applyForce(steer);
+  }
+}
+
+class World {
+
+  FlowField field;
+  Screen screen;
+
+  ArrayList<Lion> lions; //arraylist of lions
+  ArrayList<Lion> maleMatingPool;            // list of possible male lions
+  ArrayList<Lion> matingPool;          // list of possible lioness 
+  ArrayList<Lion> copy;
+  ArrayList<Sheep> sheep;
+  float prob, mutationRate;
+  int season = 0; //state variable
+
+  World(int num) {
+    sheep = new ArrayList<Sheep>();
+    lions = new ArrayList<Lion>();
+
+    matingPool = new ArrayList<Lion>();
+    copy = new ArrayList<Lion>();
+    field = new FlowField(10);
+    screen = new Screen();
+    prob = .01;
+    //add a num amount of lions to the array list at random locations
+    for (int i = 0; i < num; i++) {
+      PVector l = new PVector(random(width), random(height));
+      DNA dna = new DNA();
+      sheep.add(new Sheep(new PVector(random(width), random(height))));
+      lions.add(new Lion(l, dna));
+    }
+  }
+
+  void selection() {
+    matingPool.clear();                  //clear previous mating pool
+    float maxFitness = getMaxFitness();        
+
+    //calculate fitness, the more fit, the more entires, vice versa
+    for (int i = 0; i < copy.size(); i++) {
+      float fitnessNormal = map(copy.get(i).health, 0, maxFitness, 0, 1);
+      int n = (int) (abs(fitnessNormal) * 10);
+      println("n " + n);
+      for (int j = 0; j < 50; j++) {
+        matingPool.add(copy.get(i));
+      }
+    }
+  }
+
+  //calculates the highest fitness value
+  float getMaxFitness() {
+    float record = 0;
+    for (int i = 0; i < copy.size(); i++) {
+      if (copy.get(i).getFitness() > record) {
+        record = copy.get(i).getFitness();
+      }
+    }
+    return record;
+  }
+
+  //sexual reproduction using DNA crossover
+  void reproduction() {
+
+    for (int i = 0; i < copy.size(); i++) {
+      //choose partners from mating pool
+      int m = int(random(matingPool.size()));      
+      int d = int(random(matingPool.size()));        
+
+      Lion mom = matingPool.get(m);               
+      Lion dad = matingPool.get(d); 
+      //get their genes
+      DNA momgenes = mom.getDNA();                        
+      DNA dadgenes = dad.getDNA();
+
+      //mate their genes using DNA crossover
+      DNA child = momgenes.crossover(dadgenes);           
+      //mutate genes
+      child.mutate(mutationRate);                              
+      PVector l = new PVector(random(height), random(width));
+      //new lion with with DNA from partnes
+      lions.add(new Lion(l, child));
+    }
+    copy.clear();
+  }
+
+
+
+  // new lion using asexual reproduction
+  void addLion(float x, float y) {
+    PVector l = new PVector(x, y);
+    DNA dna = new DNA();
+    lions.add(new Lion(l, dna));
+  }
+
+  void addSheep() {
+    if (random(1)<prob) {
+      sheep.add(new Sheep(new PVector(random(width), random(height))));
+    }
+  }
+  
+  /*
+   creates ecosystem by
+   calls everything pertaining to the simulation for each sheep and lion in their respective 
+   arraylists; handles lion sensing and hunting sheep; removes sheep when eaten and lions 
+   when they die
+   */
+
+  void run() {
+    displayScreen();
+    addSheep();
+    for (int j = lions.size()-1; j>=0; j--) {
+      for (int i = sheep.size()-1; i>=0; i--) {
+        sheep.get(i).follow(field);
+        sheep.get(i).avoidLion(lions.get(j));
+        lions.get(j).arrive(sheep.get(i));
+        if (lions.get(j).sense(sheep.get(i).location)) {
+          lions.get(j).health += 100; 
+          sheep.remove(sheep.get(i));
+          println("caught");
+          break;
+        }
+      }
+    }
+    for (int i=0; i<sheep.size(); i++) {
+      sheep.get(i).update();
+      sheep.get(i).display();
+    }
+    for (int i=0; i<lions.size(); i++) {
+      lions.get(i).run();
+      if (lions.get(i).dead()) {
+        copy.add(lions.get(i));
+        lions.remove(i);
+      }
+    }
+  }
+
+  /*
+  changes the environment based on key commands and applies different forces relating 
+   to the season
+   */
+  void displayScreen() {
+    if (season==0) {  //initial screen with instructions
+      background(255);
+    } else if (season==1) { //upward directional force
+      screen.fall();
+      for (int i = 0; i< sheep.size(); i++) {
+        PVector wind = new PVector (.01, .02); 
+        sheep.get(i).applyForce(wind);
+      }
+    } else if (season==2) { //
+      screen.winter();
+      for (int i = 0; i< sheep.size(); i++) { 
+        PVector friction = sheep.get(i).velocity;
+        friction.mult(-1); 
+        friction.normalize();
+        friction.mult(.09);
+        sheep.get(i).applyForce(friction);
+      }
+    } else if (season==3) {
+      screen.spring();
+      for (int i = 0; i< sheep.size(); i++) { 
+        PVector bloom = new PVector (0, -2);
+        sheep.get(i).applyForce(bloom);
+      }
+    } else if (season ==4) {
+      screen.summer();
+      for (int i = 0; i< sheep.size(); i++) { 
+        PVector gravity = new PVector (0, .01); 
+        sheep.get(i).applyForce(gravity);
+      }
+    }
+
+    if (key == 'f') {
+      season = 1;
+    } else if (key == 'w') {
+      season =2;
+    } else if (key == 'g') {
+      season = 3;
+    } else if (key == 's') {
+      season = 4;
+    }
+  }
+}
